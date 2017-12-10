@@ -1,4 +1,6 @@
 #include "csapp.h"
+#include "mydns.h"
+#include <string.h>
 #include <sys/time.h>
 #include <time.h>
 //#define DEBUG
@@ -32,6 +34,7 @@ char *logfilename, *fake_ip, *dns_ip, *dns_port, *www_ip;
 FILE* logfile;
 char* video_server_name = "video.pku.edu.cn";
 char* video_server_port = "8080";
+char server_ip[MAXLINE];
 int bitrate_list[100];
 int bitrate_count;
 double alpha, throughput = 0;
@@ -54,6 +57,9 @@ int main(int argc, char **argv)
     if(argc>7) {
         www_ip = argv[7];
         use_dns = 0;
+    }
+    else{
+        init_mydns(dns_ip, atoi(dns_port), fake_ip);
     }
     int listenfd;
     connarg *conn;
@@ -157,7 +163,7 @@ void doit(int fd, int count)
             rio_writen(clientfd, user_agent_hdr, strlen(user_agent_hdr));
             rio_writen(clientfd, conn_hdr, strlen(conn_hdr));
             rio_writen(clientfd, proxy_conn_hdr, strlen(proxy_conn_hdr));
-            rio_writen(clientfd, "\r\n", strlen("\r\n"));
+            rio_writen(clientfd, (void*)"\r\n", strlen("\r\n"));
             dbg_printf("request bitrate list to server is done.\n");
             parse_xml_bitrates(clientfd);
             int i;
@@ -200,7 +206,7 @@ void doit(int fd, int count)
         rio_writen(clientfd, user_agent_hdr, strlen(user_agent_hdr));
         rio_writen(clientfd, conn_hdr, strlen(conn_hdr));
         rio_writen(clientfd, proxy_conn_hdr, strlen(proxy_conn_hdr));
-        rio_writen(clientfd, "\r\n", strlen("\r\n"));
+        rio_writen(clientfd, (void*)"\r\n", strlen("\r\n"));
         printf("request to server is done.\n");
 
         //read from clientfd
@@ -224,9 +230,9 @@ void doit(int fd, int count)
         //<time> <duration> <tput> <avg-tput> <bitrate> <server-ip> <chunkname>
         time_t time_now = time(NULL);
         fprintf(logfile, "%ds %lfs %lf %lf %d %s %s\n",
-                time_now-start_time, timeuse/1000, throughput_new, throughput, rate_chosen, hostname, new_uri);
+                time_now-start_time, timeuse/1000, throughput_new, throughput, rate_chosen, server_ip, new_uri);
         printf("%ds %lfs %lf %lf %d %s %s\n",
-               time_now-start_time, timeuse/1000, throughput_new, throughput, rate_chosen, hostname, new_uri);
+               time_now-start_time, timeuse/1000, throughput_new, throughput, rate_chosen, server_ip, new_uri);
 
     }
     else{
@@ -248,13 +254,19 @@ int open_clientfd_with_fake_ip(char *hostname, char *port, char *fake_ip) {
     hints.ai_socktype = SOCK_STREAM;  /* Open a connection */
     hints.ai_flags = AI_NUMERICSERV;  /* ... using a numeric port arg. */
     hints.ai_flags |= AI_ADDRCONFIG;  /* Recommended for connections */
-    Getaddrinfo(hostname, port, &hints, &listp);
-
+    if(use_dns == 1) {
+        resolve(hostname, port, &hints, &listp);
+    }
+    else{
+        Getaddrinfo(hostname, port, &hints, &listp);
+    }
     /* Walk the list for one that we can successfully connect to */
     for (p = listp; p; p = p->ai_next) {
         /* Create a socket descriptor */
-        if ((clientfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0)
+        if ((clientfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) < 0){
             continue; /* Socket failed, try the next */
+        }
+        dbg_printf("%x  %x %x\n",p->ai_family, p->ai_socktype, p->ai_protocol);
         /* Bind fake_ip*/
         struct sockaddr_in saddr;
         memset((void *) &saddr, 0, sizeof(saddr));
@@ -267,13 +279,20 @@ int open_clientfd_with_fake_ip(char *hostname, char *port, char *fake_ip) {
             continue;
         }
         /* Connect to the server */
-        if (connect(clientfd, p->ai_addr, p->ai_addrlen) != -1)
-            break; /* Success */
+        Inet_ntop(AF_INET,&((struct sockaddr_in*)(p->ai_addr))->sin_addr,server_ip, p->ai_addrlen);
+        if (connect(clientfd, p->ai_addr, p->ai_addrlen) != -1) {
+            break;/* Success */
+        }
         Close(clientfd); /* Connect failed, try another */  //line:netp:openclientfd:closefd
     }
 
     /* Clean up */
-    Freeaddrinfo(listp);
+    if(use_dns == 1) {
+        mydns_freeaddrinfo(listp);
+    }
+    else{
+        Freeaddrinfo(listp);
+    }
     if (!p) /* All connects failed */
         return -1;
     else    /* The last connect succeeded */
@@ -398,8 +417,7 @@ int uri_transform(const char* orig_uri, char* new_uri){
             return 1;
         }
     }
-
-    strcpy(orig_uri, uri);
+    strcpy(new_uri, uri);
     return 0;
 }
 int choose_rate(){
