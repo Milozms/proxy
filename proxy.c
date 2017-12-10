@@ -72,7 +72,6 @@ int main(int argc, char **argv)
     if((listenfd = open_listenfd(listen_port)) < 0){
         fprintf(stderr, "Open listenfd error.\n");
     }
-    logfile = fopen(logfilename, "w");
     start_time = time(NULL);
     int count = 1;
     while (1) {
@@ -85,7 +84,6 @@ int main(int argc, char **argv)
 	                    port, MAXLINE, 0);
 		Pthread_create(&tid, NULL, thread, conn);
     }
-    fclose(logfile);
     return 0;
 }
 /* $end main */
@@ -229,10 +227,12 @@ void doit(int fd, int count)
         dbg_printf("Throughput: %lf Kbps.\n", throughput);
         //<time> <duration> <tput> <avg-tput> <bitrate> <server-ip> <chunkname>
         time_t time_now = time(NULL);
+        logfile = fopen(logfilename, "a+");
         fprintf(logfile, "%ds %lfs %lf %lf %d %s %s\n",
                 time_now-start_time, timeuse/1000, throughput_new, throughput, rate_chosen, server_ip, new_uri);
         printf("%ds %lfs %lf %lf %d %s %s\n",
                time_now-start_time, timeuse/1000, throughput_new, throughput, rate_chosen, server_ip, new_uri);
+        fclose(logfile);
 
     }
     else{
